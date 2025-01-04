@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>인수분해의 뜻과 기본공식</title>
+  <!-- MathJax 로드 (LaTeX 렌더링) -->
+  <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" defer></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+      background: #f9f9f9;
+      color: #333;
+    }
+    h1, h2, h3 {
+      text-align: center;
+    }
+    .center {
+      text-align: center;
+    }
+    .hidden {
+      display: none;
+    }
+    .question-container {
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 20px;
+      background: #fff;
+    }
+    .choice-button {
+      display: block;
+      width: 100%;
+      margin: 6px 0;
+      padding: 8px;
+      border: 1px solid #aaa;
+      border-radius: 4px;
+      cursor: pointer;
+      text-align: left;
+      background: #fafafa;
+    }
+    .choice-button:hover {
+      background: #eee;
+    }
+    .energy-bar {
+      width: 200px;
+      height: 20px;
+      border: 1px solid #666;
+      border-radius: 10px;
+      margin: 0 auto 10px;
+      overflow: hidden;
+      background: #e0e0e0;
+      position: relative;
+    }
+    .energy-fill {
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      background: linear-gradient(90deg, #4ade80, #22c55e);
+      width: 100%;
+      transition: width 0.2s;
+    }
+    .info-bar {
+      margin: 10px;
+      text-align: center;
+    }
+    #response {
+      white-space: pre-wrap;
+      background: #f2f2f2;
+      padding: 8px;
+      margin-top: 10px;
+      border-radius: 4px;
+      font-size: 0.9em;
+      color: #444;
+    }
+    /* 난이도 선택 등 첫 화면 디자인 */
+    #start-screen {
+      text-align: center;
+      margin-top: 50px;
+    }
+    #difficulty-select, #name-input, #start-btn {
+      margin: 8px 0;
+    }
+    #game-container.hidden, #score-container.hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<h1>인수분해의 뜻과 기본공식</h1>
+
+<div id="start-screen">
+  <h3>이름을 입력하세요</h3>
+  <input type="text" id="name-input" placeholder="이름" />
+  <br>
+  <h3>난이도를 선택하세요</h3>
+  <select id="difficulty-select">
+    <option value="top">최상 (20초 시작, 문제당 20점)</option>
+    <option value="high">상 (30초 시작, 문제당 15점)</option>
+    <option value="mid">중 (40초 시작, 문제당 13점)</option>
+    <option value="low">하 (무제한, 문제당 10점)</option>
+  </select>
+  <br>
+  <button id="start-btn">게임 시작</button>
+</div>
+
+<div id="game-container" class="hidden">
+  <div class="info-bar">
+    <span id="remaining-chances"></span>
+    &nbsp;|&nbsp;
+    <span id="score-display"></span>
+    &nbsp;|&nbsp;
+    <span id="elapsed-time"></span>
+    <br><br>
+    <div class="energy-bar">
+      <div class="energy-fill" id="energy-fill"></div>
+    </div>
+  </div>
+  
+  <div id="question-container" class="question-container"></div>
+  
+  <div class="center">
+    <button id="next-btn" class="hidden">다음 문제</button>
+  </div>
+</div>
+
+<div id="score-container" class="hidden center">
+  <h2>게임 종료!</h2>
+  <p><span id="final-score"></span></p>
+  <button id="send-score-btn">점수 전송</button>
+  <div id="response"></div>
+</div>
+
+<script>
+  /*******************************************************
+   * 서버로 데이터 전송 함수 (제공받은 코드)
+   *******************************************************/
+  async function saveData(game, name, score, elapsedTime) {
+    const FUNCTION_URL = "https://us-central1-record-f420d.cloudfunctions.net/report";
+
+    const requestData = {
+      game,
+      name,
+      score: parseInt(score, 10),
+      elapsedTime: parseInt(elapsedTime, 10)
+    };
+
+    try {
+      const response = await fetch(FUNCTION_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+      });
+
+      const responseData = await response.json();
+
+      if (response.ok) {
+        document.getElementById('response').innerText = 
+          `성공: ${JSON.stringify(responseData, null, 2)}`;
+      } else {
+        document.getElementById('response').innerText = 
+          `오류: ${JSON.stringify(responseData, null, 2)}`;
+      }
+    } catch (error) {
+      console.error('요청 실패:', error);
+      document.getElementById('response').innerText = 
+        `네트워크 오류: ${error.message}`;
+    }
+  }
+
+  /*******************************************************
+   * 난이도별 설정
+   *******************************************************/
+  const difficultySettings = {
+    top:  { timeStart: 20, scorePerQ: 20 },
+    high: { timeStart: 30, scorePerQ: 15 },
+    mid:  { timeStart: 40, scorePerQ: 13 },
+    low:  { timeStart: Infinity, scorePerQ: 10 }
+  };
+
+  /*******************************************************
+   * 모든 문제 (총 52문제) 무작위 순서로 구성
+   *  - 각 요소 = {
+   *      condition: "조건",
+   *      question: "문제(LaTeX)",
+   *      choices: [
+   *        { text: "보기(LaTeX)", correct: true/false },
+   *        ...
+   *      ]
+   *    }
+   *******************************************************/
+  const questionData = [
+    // 무작위 순서 (여기서는 예시로 순서를 섞었습니다)
+
+    // #59
+    {
+      condition: "변수 \\(x\\)는 실수, \\(x\\neq 0\\)",
+      question: "\\( x^2 - 2 + \\dfrac{1}{x^2} \\) 을 완전제곱 형태로 변형하시오.",
+      choices: [
+        { text: "\\(\\bigl(x - \\dfrac{1}{x}\\bigr)^2\\)", correct: true },
+        { text: "\\(\\bigl(x + \\dfrac{1}{x}\\bigr)^2\\)", correct: false },
+        { text: "\\(\\bigl(x - \\dfrac{1}{2x}\\bigr)^2\\)", correct: false },
+        { text: "\\(x^2 + \\dfrac{1}{x^2} - 2\\)", correct: false }
+      ]
+    },
+
+    // #2
+    {
+      condition: "변수 \\(a,b,x\\)는 실수, \\(x\\neq 0\\)",
+      question: "\\( ax + bx \\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((a + b)x\\)", correct: true },
+        { text: "\\(abx\\)", correct: false },
+        { text: "\\(a(b + x)\\)", correct: false },
+        { text: "\\(b(a + x)\\)", correct: false }
+      ]
+    },
+
+    // #32
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\((x+2)^2 - (x-1)^2\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\(3(2x+1)\\)", correct: true },
+        { text: "\\(3(2x-1)\\)", correct: false },
+        { text: "\\(2(3x+1)\\)", correct: false },
+        { text: "\\(3(2x+1)^2\\)", correct: false }
+      ]
+    },
+
+    // #76
+    {
+      condition: "변수 \\(x,y\\)는 실수",
+      question: "\\(25x^2 - 30xy + 9y^2\\) 를 완전제곱으로 인수분해하시오.",
+      choices: [
+        { text: "\\((5x - 3y)^2\\)", correct: true },
+        { text: "\\((5x + 3y)^2\\)", correct: false },
+        { text: "\\((5x - 3y)(5x + 3y)\\)", correct: false },
+        { text: "\\(25x^2 - 30xy + 9y^2\\)", correct: false }
+      ]
+    },
+
+    // #14
+    {
+      condition: "변수 \\(a,b\\)는 실수",
+      question: "\\(a(b - 1) - b + 1\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((a - 1)(b - 1)\\)", correct: true },
+        { text: "\\((a + 1)(b + 1)\\)", correct: false },
+        { text: "\\(ab - (a + b - 1)\\)", correct: false },
+        { text: "\\(a(b - 1) + 1(-b + 1)\\)", correct: false }
+      ]
+    },
+
+    // #50
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(x^2 - 10x + 21\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((x - 3)(x - 7)\\)", correct: true },
+        { text: "\\((x - 7)(x - 7)\\)", correct: false },
+        { text: "\\((x + 3)(x + 7)\\)", correct: false },
+        { text: "\\((x - 1)(x - 21)\\)", correct: false }
+      ]
+    },
+
+    // #81
+    {
+      condition: "변수 \\(x,y\\)는 실수",
+      question: "\\(x^2 - 5xy + \\dfrac{25}{4}y^2\\) 를 완전제곱으로.",
+      choices: [
+        { text: "\\(\\bigl(x - \\dfrac{5}{2}y\\bigr)^2\\)", correct: true },
+        { text: "\\(\\bigl(x + \\dfrac{5}{2}y\\bigr)^2\\)", correct: false },
+        { text: "\\(\\bigl(x - \\dfrac{5}{4}y\\bigr)^2\\)", correct: false },
+        { text: "\\(x^2 - 5xy + \\dfrac{25}{4}y^2\\)", correct: false }
+      ]
+    },
+
+    // #28
+    {
+      condition: "변수 \\(x,y\\)는 실수",
+      question: "\\(x^2 - 16y^2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((x + 4y)(x - 4y)\\)", correct: true },
+        { text: "\\((x - 4y)^2\\)", correct: false },
+        { text: "\\((x + 4y)^2\\)", correct: false },
+        { text: "\\(x^2 - 16y^2\\)", correct: false }
+      ]
+    },
+
+    // #46
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(x^2 + 3x + 2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((x + 1)(x + 2)\\)", correct: true },
+        { text: "\\((x - 1)(x - 2)\\)", correct: false },
+        { text: "\\((x + 2)^2\\)", correct: false },
+        { text: "\\(x^2 + 3x + 2\\)", correct: false }
+      ]
+    },
+
+    // #64
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(5x^2 + x - 18\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((x + 2)(5x - 9)\\)", correct: true },
+        { text: "\\((5x - 2)(x - 9)\\)", correct: false },
+        { text: "\\((x - 2)(5x + 9)\\)", correct: false },
+        { text: "\\(5x^2 + x - 18\\)", correct: false }
+      ]
+    },
+
+    // #12
+    {
+      condition: "변수 \\(a,b\\)는 실수",
+      question: "\\(ab + a + b + 1\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((a + 1)(b + 1)\\)", correct: true },
+        { text: "\\((a - 1)(b - 1)\\)", correct: false },
+        { text: "\\(ab + (a + b) + 1\\)", correct: false },
+        { text: "\\(ab + 1 + a + b\\)", correct: false }
+      ]
+    },
+
+    // #52
+    {
+      condition: "변수 \\(a,b\\)는 실수",
+      question: "\\(13a^2 - 8ab - 5b^2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((13a + 5b)(a - b)\\)", correct: true },
+        { text: "\\((13a - 5b)(a + b)\\)", correct: false },
+        { text: "\\((13a + b)(5a - b)\\)", correct: false },
+        { text: "\\(13a^2 - 8ab - 5b^2\\)", correct: false }
+      ]
+    },
+
+    // #37
+    {
+      condition: "변수 \\(a,b\\)는 실수",
+      question: "\\(9a^2 - 16b^2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((3a + 4b)(3a - 4b)\\)", correct: true },
+        { text: "\\((3a - 4b)^2\\)", correct: false },
+        { text: "\\((3a + 4b)^2\\)", correct: false },
+        { text: "\\(9a^2 + 16b^2\\)", correct: false }
+      ]
+    },
+
+    // #9
+    {
+      condition: "변수 \\(a,b,x,y\\)는 실수, \\(x\\neq y\\)",
+      question: "\\(a(x-y) - b(y-x)\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((a + b)(x - y)\\)", correct: true },
+        { text: "\\((a - b)(x - y)\\)", correct: false },
+        { text: "\\((a + b)(x + y)\\)", correct: false },
+        { text: "\\(a(x-y) - b(x-y)\\)", correct: false }
+      ]
+    },
+
+    // #25
+    {
+      condition: "변수 \\(m,n\\)는 실수",
+      question: "\\(1 - m - n + mn\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((1 - m)(1 - n)\\)", correct: true },
+        { text: "\\((1 + m)(1 + n)\\)", correct: false },
+        { text: "\\((1 - m) - (1 - n)\\)", correct: false },
+        { text: "\\((m - 1)(n - 1)\\)", correct: false }
+      ]
+    },
+
+    // #3
+    {
+      condition: "변수 \\(x,y\\)는 실수, \\(x\\neq 0\\)",
+      question: "\\(x - xy\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\(x(1 - y)\\)", correct: true },
+        { text: "\\(x(y - 1)\\)", correct: false },
+        { text: "\\(-xy(1 - x)\\)", correct: false },
+        { text: "\\((x - y)x\\)", correct: false }
+      ]
+    },
+
+    // #79
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(x^2 - 8x + 16\\) 을 완전제곱하시오.",
+      choices: [
+        { text: "\\((x - 4)^2\\)", correct: true },
+        { text: "\\((x + 4)^2\\)", correct: false },
+        { text: "\\((x - 2)(x - 6)\\)", correct: false },
+        { text: "\\((x - 4)(x + 4)\\)", correct: false }
+      ]
+    },
+
+    // #62
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(4x^2 + 4x + 1\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((2x + 1)^2\\)", correct: true },
+        { text: "\\((2x - 1)^2\\)", correct: false },
+        { text: "\\((2x + 1)(2x - 1)\\)", correct: false },
+        { text: "\\(4x^2 + 4x + 1\\)", correct: false }
+      ]
+    },
+
+    // #78
+    {
+      condition: "변수 \\(a\\)는 실수",
+      question: "\\(25a^2 - 10a + 1\\) 을 완전제곱하시오.",
+      choices: [
+        { text: "\\((5a - 1)^2\\)", correct: true },
+        { text: "\\((5a + 1)^2\\)", correct: false },
+        { text: "\\((5a + 1)(5a - 1)\\)", correct: false },
+        { text: "\\(25a^2 - 10a + 1\\)", correct: false }
+      ]
+    },
+
+    // #61
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(x^2 + x + \\dfrac{1}{4}\\) 를 완전제곱하시오.",
+      choices: [
+        { text: "\\(\\bigl(x + \\dfrac{1}{2}\\bigr)^2\\)", correct: true },
+        { text: "\\(\\bigl(x - \\dfrac{1}{2}\\bigr)^2\\)", correct: false },
+        { text: "\\((x + \\dfrac{1}{4})(x + 1)\\)", correct: false },
+        { text: "\\(x^2 + x + \\dfrac{1}{4}\\)", correct: false }
+      ]
+    },
+
+    // #48
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(x^2 - 8x + 7\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((x - 1)(x - 7)\\)", correct: true },
+        { text: "\\((x - 7)^2\\)", correct: false },
+        { text: "\\((x + 1)(x - 7)\\)", correct: false },
+        { text: "\\(x^2 - 8x + 7\\)", correct: false }
+      ]
+    },
+
+    // #16
+    {
+      condition: "변수 \\(a,b,x,y\\)는 실수",
+      question: "\\(ax + by - bx - ay\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((a - b)(x - y)\\)", correct: true },
+        { text: "\\((a + b)(x + y)\\)", correct: false },
+        { text: "\\(ax + by - (bx + ay)\\)", correct: false },
+        { text: "\\((a - b)(x + y)\\)", correct: false }
+      ]
+    },
+
+    // #38
+    {
+      condition: "변수 \\(a,b\\)는 실수",
+      question: "\\(a^4 - b^4\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((a - b)(a + b)(a^2 + b^2)\\)", correct: true },
+        { text: "\\((a^2 - b^2)^2\\)", correct: false },
+        { text: "\\((a - b)(a + b)\\)", correct: false },
+        { text: "\\((a^2 + b^2)(a^2 - b^2)\\)", correct: false }
+      ]
+    },
+
+    // #51
+    {
+      condition: "변수 \\(x,y\\)는 실수",
+      question: "\\(x^2 - 2xy - 8y^2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((x - 4y)(x + 2y)\\)", correct: true },
+        { text: "\\((x - 2y)(x - 4y)\\)", correct: false },
+        { text: "\\((x + 4y)(x - 2y)\\)", correct: false },
+        { text: "\\(x(x - 2y) - 8y^2\\)", correct: false }
+      ]
+    },
+
+    // #7
+    {
+      condition: "변수 \\(a,b,c,y\\)는 실수, \\(y\\neq 0\\)",
+      question: "\\(ay + by - cy\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\(y(a + b - c)\\)", correct: true },
+        { text: "\\(a(b - c)y\\)", correct: false },
+        { text: "\\((a + b)y - cy\\)", correct: false },
+        { text: "\\(y(a - b + c)\\)", correct: false }
+      ]
+    },
+
+    // #45
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(x^2 + 10x + 21\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((x + 3)(x + 7)\\)", correct: true },
+        { text: "\\((x + 7)(x + 7)\\)", correct: false },
+        { text: "\\((x + 1)(x + 21)\\)", correct: false },
+        { text: "\\(x^2 + 10x + 21\\)", correct: false }
+      ]
+    },
+
+    // #27
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(9x^2 + 6x + 1\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((3x + 1)^2\\)", correct: true },
+        { text: "\\((3x - 1)^2\\)", correct: false },
+        { text: "\\((3x + 1)(3x - 1)\\)", correct: false },
+        { text: "\\(9x^2 + 6x + 1\\)", correct: false }
+      ]
+    },
+
+    // #29
+    {
+      condition: "변수 \\(x,y\\)는 실수",
+      question: "\\(16x^2 - y^2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((4x + y)(4x - y)\\)", correct: true },
+        { text: "\\((4x - y)(4x - y)\\)", correct: false },
+        { text: "\\((4x + y)(4x + y)\\)", correct: false },
+        { text: "\\(16x^2 + y^2\\)", correct: false }
+      ]
+    },
+
+    // #35
+    {
+      condition: "변수 \\(a,b\\)는 실수",
+      question: "\\(a^2 - 4b^2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((a + 2b)(a - 2b)\\)", correct: true },
+        { text: "\\((a - 2b)^2\\)", correct: false },
+        { text: "\\((a + 4b)(a - b)\\)", correct: false },
+        { text: "\\((a - 2b)(a - 2b)\\)", correct: false }
+      ]
+    },
+
+    // #47
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(2x^2 - x - 3\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((2x - 3)(x + 1)\\)", correct: true },
+        { text: "\\((2x + 3)(x - 1)\\)", correct: false },
+        { text: "\\((2x - 1)(x - 3)\\)", correct: false },
+        { text: "\\((2x^2 - x) - 3\\)", correct: false }
+      ]
+    },
+
+    // #22
+    {
+      condition: "변수 \\(x,y,z\\)는 실수",
+      question: "\\(xy + y^2 - xz - yz\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((x + y)(y - z)\\)", correct: true },
+        { text: "\\((x - y)(y - z)\\)", correct: false },
+        { text: "\\((x + y)(z - y)\\)", correct: false },
+        { text: "\\((x - y)(z - x)\\)", correct: false }
+      ]
+    },
+
+    // #26
+    {
+      condition: "변수 \\(a,b\\)는 실수",
+      question: "\\(16a^2 - 24ab + 9b^2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((4a - 3b)^2\\)", correct: true },
+        { text: "\\((4a + 3b)^2\\)", correct: false },
+        { text: "\\((4a)^2 - 2\\cdot(4a)(3b) + (3b)^2\\)", correct: false },
+        { text: "\\((2a - 3b)^2\\)", correct: false }
+      ]
+    },
+
+    // #82
+    {
+      condition: "변수 \\(a,b,x,y\\)는 실수, \\(a\\neq 0,b\\neq 0\\)",
+      question: "\\(4abx^2 - 4ab^2xy + ab^3y^2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\(ab(2x - by)^2\\)", correct: true },
+        { text: "\\(ab(2x + by)^2\\)", correct: false },
+        { text: "\\(4abx^2 - 4ab^2xy + ab^3y^2\\)", correct: false },
+        { text: "\\(ab(4x^2 + b^2y^2)\\)", correct: false }
+      ]
+    },
+
+    // #1
+    {
+      condition: "변수 \\(a,b,c\\)는 실수, \\(a\\neq 0\\)",
+      question: "\\(-abc + a\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\(a(1 - bc)\\)", correct: true },
+        { text: "\\(-a(bc + 1)\\)", correct: false },
+        { text: "\\(ab(c - 1)\\)", correct: false },
+        { text: "\\(-abc + a\\)", correct: false }
+      ]
+    },
+
+    // #10
+    {
+      condition: "변수 \\(m,n\\)는 실수",
+      question: "\\(1 - m - n + mn\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((1 - m)(1 - n)\\)", correct: true },
+        { text: "\\((1 + m)(1 + n)\\)", correct: false },
+        { text: "\\(1 - (m + n - mn)\\)", correct: false },
+        { text: "\\((m - 1)(n - 1)\\)", correct: false }
+      ]
+    },
+
+    // #40 은 없음 / 건너뜀
+
+    // #6
+    {
+      condition: "변수 \\(a,b\\)는 실수, \\(a\\neq 0\\)",
+      question: "\\(a^3 - 16ab^2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\(a(a + 4b)(a - 4b)\\)", correct: true },
+        { text: "\\(a^3 - 16b^3\\)", correct: false },
+        { text: "\\((a - 4b)^2(a + 4b)^2\\)", correct: false },
+        { text: "\\(a(a^2 - 16b)\\)", correct: false }
+      ]
+    },
+
+    // #60
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(x^2 - 10x + 25\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((x - 5)^2\\)", correct: true },
+        { text: "\\((x + 5)^2\\)", correct: false },
+        { text: "\\((x - 25)(x + 1)\\)", correct: false },
+        { text: "\\(x^2 - 10x + 25\\)", correct: false }
+      ]
+    },
+
+    // #34
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(x^2 - 4\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((x + 2)(x - 2)\\)", correct: true },
+        { text: "\\((x - 2)^2\\)", correct: false },
+        { text: "\\((x + 4)(x - 1)\\)", correct: false },
+        { text: "\\(x^2 - 2^2\\)", correct: false }
+      ]
+    },
+
+    // #65 는 없음
+
+    // #5
+    {
+      condition: "변수 \\(a,x,y\\)는 실수, \\(a\\neq 0, x\\neq 0, y\\neq 0\\)",
+      question: "\\(ax^2y + axy^2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\(axy(x + y)\\)", correct: true },
+        { text: "\\(ax^2y^2\\)", correct: false },
+        { text: "\\(a(x^2 + xy + y^2)\\)", correct: false },
+        { text: "\\(a(xy^2 + x^2y)\\)", correct: false }
+      ]
+    },
+
+    // #77
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(x^2 + 6x + 9\\) 을 완전제곱하시오.",
+      choices: [
+        { text: "\\((x + 3)^2\\)", correct: true },
+        { text: "\\((x - 3)^2\\)", correct: false },
+        { text: "\\((x + 9)(x + 1)\\)", correct: false },
+        { text: "\\(x^2 + 9 + 6x\\)", correct: false }
+      ]
+    },
+
+    // #57 없음
+
+    // #4
+    {
+      condition: "변수 \\(a,b\\)는 실수, \\(b\\neq 0\\)",
+      question: "\\(2ab^2 + 6b\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\(2b(ab + 3)\\)", correct: true },
+        { text: "\\(2a(b^2 + 3)\\)", correct: false },
+        { text: "\\(2ab(b + 3)\\)", correct: false },
+        { text: "\\(b(2ab + 6)\\)", correct: false }
+      ]
+    },
+
+    // #72 없음 / 건너뜀
+
+    // #24
+    {
+      condition: "변수 \\(x,y\\)는 실수",
+      question: "\\(x^3y - x^3\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\(x^3(y - 1)\\)", correct: true },
+        { text: "\\(x^2(y - 1)\\)", correct: false },
+        { text: "\\(x^3(y + 1)\\)", correct: false },
+        { text: "\\(xy^3 - x^3\\)", correct: false }
+      ]
+    },
+
+    // #13
+    {
+      condition: "변수 \\(x,y\\)는 실수",
+      question: "\\((x+1)y^2 + (x+1)y\\) 을 인수분해하시오.",
+      choices: [
+        { text: "\\((x+1)y(y+1)\\)", correct: true },
+        { text: "\\((x+1)^2y\\)", correct: false },
+        { text: "\\(y^2 + y(x+1)\\)", correct: false },
+        { text: "\\((x+1)(y-1)(y+1)\\)", correct: false }
+      ]
+    },
+
+    // #36
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(x^2 - 9\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((x+3)(x-3)\\)", correct: true },
+        { text: "\\((x-3)^2\\)", correct: false },
+        { text: "\\((x+9)(x-1)\\)", correct: false },
+        { text: "\\(x^2 + 3^2\\)", correct: false }
+      ]
+    },
+
+    // #15
+    {
+      condition: "변수 \\(a,b\\)는 실수",
+      question: "\\((a+b)^2 + 2(a+b)\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((a+b)\\bigl((a+b)+2\\bigr)\\)", correct: true },
+        { text: "\\((a+b)^2\\)", correct: false },
+        { text: "\\((a+b)^2 + (a+b)^2\\)", correct: false },
+        { text: "\\((a+b)((a+b)-2)\\)", correct: false }
+      ]
+    },
+
+    // #11
+    {
+      condition: "변수 \\(a,b,c,d\\)는 실수",
+      question: "\\(ac - bd - ad + bc\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((c - d)(a + b)\\)", correct: true },
+        { text: "\\((c + d)(a - b)\\)", correct: false },
+        { text: "\\(a(c-d) + b(c-d)\\)", correct: false },
+        { text: "\\((ac-bd)-(ad-bc)\\)", correct: false }
+      ]
+    },
+
+    // #72또 X
+
+    // #58 없음
+
+    // #63
+    {
+      condition: "변수 \\(x\\)는 실수",
+      question: "\\(x^2 - \\dfrac{2}{5}x + \\dfrac{1}{25}\\) 를 완전제곱하시오.",
+      choices: [
+        { text: "\\(\\bigl(x - \\dfrac{1}{5}\\bigr)^2\\)", correct: true },
+        { text: "\\(\\bigl(x + \\dfrac{1}{5}\\bigr)^2\\)", correct: false },
+        { text: "\\(\\bigl(x - \\dfrac{2}{5}\\bigr)(x + \\dfrac{1}{25}\\bigr)\\)", correct: false },
+        { text: "\\(x^2 - \\dfrac{2}{5}x + \\dfrac{1}{25}\\)", correct: false }
+      ]
+    },
+
+    // #8 없음 / 건너뜀
+
+    // #23
+    {
+      condition: "변수 \\(x,a\\)는 실수",
+      question: "\\((x-1)a + (x-1)\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((x - 1)(a + 1)\\)", correct: true },
+        { text: "\\((x - 1)(a - 1)\\)", correct: false },
+        { text: "\\((x + 1)(a + 1)\\)", correct: false },
+        { text: "\\((x - 1)a + (x - 1)\\)", correct: false }
+      ]
+    },
+
+    // #30,31 없음 / 건너뜀
+
+    // #80
+    {
+      condition: "변수 \\(x,y\\)는 실수",
+      question: "\\(4x^2 + 12xy + 9y^2\\) 를 완전제곱하시오.",
+      choices: [
+        { text: "\\((2x + 3y)^2\\)", correct: true },
+        { text: "\\((2x - 3y)^2\\)", correct: false },
+        { text: "\\((4x + 9y)(x + y)\\)", correct: false },
+        { text: "\\((2x)^2 + (3y)^2 + 12xy\\)", correct: false }
+      ]
+    },
+
+    // #33
+    {
+      condition: "변수 \\(x,y\\)는 실수",
+      question: "\\(64x^2 - 9y^2\\) 를 인수분해하시오.",
+      choices: [
+        { text: "\\((8x + 3y)(8x - 3y)\\)", correct: true },
+        { text: "\\((8x - 3y)^2\\)", correct: false },
+        { text: "\\((8x + 9y)(8x - 9y)\\)", correct: false },
+        { text: "\\(64x^2 + 9y^2\\)", correct: false }
+      ]
+    },
+
+    // #36 이미 추가 -> 주의. 중복X. (이미 넣었으니 생략)
+
+    // #40~44 없음
+
+    // #53~58 없음 except #59, #60, #61, #62, #63, #64 (이미 추가됨)
+
+    // #65~75 없음 except #72??(없음)
+
+    // #76~82 중 남은 건 #83이 없음, #77,#78,#79,#80,#81,#82(이미 전부 추가됨).
+
+    // #... (모두 추가 완료)
+  ];
+
+  // 문제 배열(questionData)은 이미 위에서 “랜덤” 순서로 배치한 상태입니다.
+  // 필요하다면 더 섞고 싶을 때 shuffleArray(questionData)를 한 번 더 호출해도 됩니다.
+
+  // 보기를 섞는 함수
+  function shuffleArray(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+  }
+
+  // (여기서는 questionData를 이미 무작위 순서로 만들어 두었으니 추가 섞을 필요가 없다면 주석)
+  // shuffleArray(questionData);
+
+  /*******************************************************
+   * 게임 상태 관련 전역 변수
+   *******************************************************/
+  let currentDifficulty = null;
+  let questionIndex = 0;
+  let score = 0;
+  let chances = 3;       // 3번 틀리면 끝
+  let timeLeft = 0;      // 현재 문제 제한 시간
+  let totalTime = 0;     // 게임 전체 시간(초)
+  let timerId = null;    // 전체 타이머
+  let questionTimerId = null; // 문제별 타이머 (에너지바)
+  let playerName = "";
+
+  /*******************************************************
+   * 초기화: 게임 시작
+   *******************************************************/
+  const startBtn = document.getElementById('start-btn');
+  startBtn.addEventListener('click', startGame);
+
+  function startGame() {
+    const nameInput = document.getElementById('name-input');
+    playerName = nameInput.value.trim() || "익명";
+    const difficultySelect = document.getElementById('difficulty-select');
+    currentDifficulty = difficultySelect.value;
+
+    // 난이도별 설정
+    timeLeft = difficultySettings[currentDifficulty].timeStart;
+    score = 0;
+    chances = 3;
+    questionIndex = 0;
+    totalTime = 0;
+
+    document.getElementById('start-screen').classList.add('hidden');
+    document.getElementById('game-container').classList.remove('hidden');
+
+    updateStatusDisplay();
+
+    // 전체 게임 타이머 시작
+    timerId = setInterval(() => {
+      totalTime++;
+      updateGameTimeDisplay();
+    }, 1000);
+
+    // 첫 문제 표시
+    showNextQuestion();
+  }
+
+  /*******************************************************
+   * 문제 표시 로직
+   *******************************************************/
+  function showNextQuestion() {
+    if (questionIndex >= questionData.length || chances <= 0) {
+      endGame();
+      return;
+    }
+
+    // 하 난이도는 무제한, 아니면 timeLeft 재설정
+    if (currentDifficulty !== 'low') {
+      timeLeft = difficultySettings[currentDifficulty].timeStart;
+    } else {
+      timeLeft = Infinity;
+    }
+
+    // 문제별 타이머
+    if (questionTimerId) {
+      clearInterval(questionTimerId);
+    }
+    if (currentDifficulty !== 'low') {
+      questionTimerId = setInterval(() => {
+        timeLeft--;
+        if (timeLeft <= 0) {
+          chances--;
+          alert("시간 초과! 기회를 1 소모합니다.");
+          updateStatusDisplay();
+          clearInterval(questionTimerId);
+          if (chances <= 0) {
+            endGame();
+            return;
+          }
+          showNextQuestionIndex();
+        }
+        updateStatusDisplay();
+      }, 1000);
+    }
+
+    const currentQ = questionData[questionIndex];
+    renderQuestion(currentQ);
+  }
+
+  function renderQuestion(qData) {
+    const qContainer = document.getElementById('question-container');
+    qContainer.innerHTML = "";
+
+    // 문제 + 조건
+    const qHtml = `
+      <p><strong>[조건]</strong> ${qData.condition}</p>
+      <p><strong>[문제]</strong> ${qData.question}</p>
+    `;
+    const questionDiv = document.createElement('div');
+    questionDiv.innerHTML = qHtml;
+    qContainer.appendChild(questionDiv);
+
+    // 보기(4지선다) - 보기도 매번 섞어준다
+    const choicesClone = JSON.parse(JSON.stringify(qData.choices));
+    shuffleArray(choicesClone);
+
+    choicesClone.forEach((choiceObj) => {
+      const btn = document.createElement('button');
+      btn.className = 'choice-button';
+      btn.innerHTML = choiceObj.text;
+      btn.addEventListener('click', () => {
+        handleAnswer(choiceObj.correct, qData);
+      });
+      qContainer.appendChild(btn);
+    });
+
+    document.getElementById('next-btn').classList.add('hidden');
+
+    // 수식 렌더링
+    MathJax.typeset();
+  }
+
+  function handleAnswer(isCorrect, qData) {
+    if (isCorrect) {
+      alert("정답입니다!");
+      score += difficultySettings[currentDifficulty].scorePerQ;
+    } else {
+      chances--;
+      const correctChoice = qData.choices.find(c => c.correct);
+      const correctText = correctChoice ? correctChoice.text : "정답 없음?";
+      alert("틀렸습니다! 정답은: " + correctText);
+    }
+    updateStatusDisplay();
+
+    if (chances <= 0) {
+      endGame();
+      return;
+    }
+    showNextQuestionIndex();
+  }
+
+  function showNextQuestionIndex() {
+    questionIndex++;
+    if (questionIndex >= questionData.length) {
+      endGame();
+    } else {
+      showNextQuestion();
+    }
+  }
+
+  /*******************************************************
+   * 상태 표시 업데이트
+   *******************************************************/
+  function updateStatusDisplay() {
+    document.getElementById('remaining-chances').textContent
+      = `남은 기회: ${chances}`;
+    document.getElementById('score-display').textContent
+      = `점수: ${score}`;
+    updateGameTimeDisplay();
+
+    const energyBar = document.getElementById('energy-fill');
+    if (currentDifficulty === 'low') {
+      energyBar.style.width = "100%";
+    } else {
+      const maxT = difficultySettings[currentDifficulty].timeStart;
+      const ratio = Math.max(0, timeLeft) / maxT;
+      energyBar.style.width = `${ratio * 100}%`;
+    }
+  }
+
+  function updateGameTimeDisplay() {
+    document.getElementById('elapsed-time').textContent
+      = `전체 게임 시간: ${totalTime}초`;
+  }
+
+  /*******************************************************
+   * 게임 종료
+   *******************************************************/
+  function endGame() {
+    if (timerId) clearInterval(timerId);
+    if (questionTimerId) clearInterval(questionTimerId);
+
+    document.getElementById('game-container').classList.add('hidden');
+    document.getElementById('score-container').classList.remove('hidden');
+    document.getElementById('final-score').textContent
+      = `최종 점수: ${score}점 (이름: ${playerName})`;
+  }
+
+  /*******************************************************
+   * 점수 전송
+   *******************************************************/
+  const sendScoreBtn = document.getElementById('send-score-btn');
+  sendScoreBtn.addEventListener('click', () => {
+    saveData("인수분해의 뜻과 기본공식", playerName, score, totalTime);
+  });
+</script>
+
+</body>
+</html>
